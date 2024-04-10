@@ -310,7 +310,8 @@ public class UserProcess {
      * Release any resources allocated by <tt>loadSections()</tt>.
      */
     protected void unloadSections() {
-    }    
+        // TODO: Do we have to implement this?
+    }
 
     /**
      * Initialize the processor's registers in preparation for running the
@@ -336,16 +337,166 @@ public class UserProcess {
     }
 
     /**
-     * Handle the halt() system call. 
+     * Handle the halt() system call.
+     *
+     * Halt the Nachos machine by calling Machine.halt(). Only the root process
+     * (the first process, executed by UserKernel.run()) should be allowed to
+     * execute this syscall. Any other process should ignore the syscall and return
+     * immediately.
      */
     private int handleHalt() {
+		Machine.halt();
 
-	Machine.halt();
-	
-	Lib.assertNotReached("Machine.halt() did not halt machine!");
-	return 0;
+		Lib.assertNotReached("Machine.halt() did not halt machine!");
+		return 0;
     }
 
+	/**
+	 * Handle the exit() system call.
+     *
+     * Terminate the current process immediately. Any open file descriptors
+     * belonging to the process are closed. Any children of the process no longer
+     * have a parent process.
+     *
+     * status is returned to the parent process as this process's exit status and
+     * can be collected using the join syscall. A process exiting normally should
+     * (but is not required to) set status to 0.
+     *
+     * exit() never returns.
+	 */
+	private void handleExit(int status) {
+        // TODO: Implement this
+	}
+
+    /**
+     * Handle the creat() system call.
+     *
+     * Attempt to open the named disk file, creating it if it does not exist,
+     * and return a file descriptor that can be used to access the file.
+     *
+     * Note that creat() can only be used to create files on disk; creat() will
+     * never return a file descriptor referring to a stream.
+     *
+     * Returns the new file descriptor, or -1 if an error occurred.
+     */
+    private int handleCreat(int name) {
+        // TODO: Implement this
+        return -1;
+    }
+
+    /**
+     * Handle the open() system call.
+     *
+     * Attempt to open the named file and return a file descriptor.
+     *
+     * Note that open() can only be used to open files on disk; open() will never
+     * return a file descriptor referring to a stream.
+     *
+     * Returns the new file descriptor, or -1 if an error occurred.
+     */
+    private int handleOpen(int name) {
+        // TODO: Implement this
+        return -1;
+    }
+
+    /**
+     * Handle the read() system call.
+     *
+     * Attempt to read up to count bytes into buffer from the file or stream
+     * referred to by fileDescriptor.
+     *
+     * On success, the number of bytes read is returned. If the file descriptor
+     * refers to a file on disk, the file position is advanced by this number.
+     *
+     * It is not necessarily an error if this number is smaller than the number of
+     * bytes requested. If the file descriptor refers to a file on disk, this
+     * indicates that the end of the file has been reached. If the file descriptor
+     * refers to a stream, this indicates that the fewer bytes are actually
+     * available right now than were requested, but more bytes may become available
+     * in the future. Note that read() never waits for a stream to have more data;
+     * it always returns as much as possible immediately.
+     *
+     * On error, -1 is returned, and the new file position is undefined. This can
+     * happen if fileDescriptor is invalid, if part of the buffer is read-only or
+     * invalid, or if a network stream has been terminated by the remote host and
+     * no more data is available.
+     */
+    private int handleRead(int fd, int buffer, int size) {
+        // TODO: Implement this
+        return -1;
+    }
+
+    /**
+     * Handle the write() system call.
+     *
+     * Attempt to write up to count bytes from buffer to the file or stream
+     * referred to by fileDescriptor. write() can return before the bytes are
+     * actually flushed to the file or stream. A write to a stream can block,
+     * however, if kernel queues are temporarily full.
+     *
+     * On success, the number of bytes written is returned (zero indicates nothing
+     * was written), and the file position is advanced by this number. It IS an
+     * error if this number is smaller than the number of bytes requested. For
+     * disk files, this indicates that the disk is full. For streams, this
+     * indicates the stream was terminated by the remote host before all the data
+     * was transferred.
+     *
+     * On error, -1 is returned, and the new file position is undefined. This can
+     * happen if fileDescriptor is invalid, if part of the buffer is invalid, or
+     * if a network stream has already been terminated by the remote host.
+     */
+    private int handleWrite(int fd, int buffer, int size) {
+        // TODO: Implement this
+        return -1;
+    }
+
+    /**
+     * Handle the close() system call.
+     *
+     * Close a file descriptor, so that it no longer refers to any file or stream
+     * and may be reused.
+     *
+     * If the file descriptor refers to a file, all data written to it by write()
+     * will be flushed to disk before close() returns.
+     * If the file descriptor refers to a stream, all data written to it by write()
+     * will eventually be flushed (unless the stream is terminated remotely), but
+     * not necessarily before close() returns.
+     *
+     * The resources associated with the file descriptor are released. If the
+     * descriptor is the last reference to a disk file which has been removed using
+     * unlink, the file is deleted (this detail is handled by the file system
+     * implementation).
+     *
+     * Returns 0 on success, or -1 if an error occurred.
+     */
+    private int handleClose(int fd) {
+        // TODO: Implement this
+        return -1;
+    }
+
+    /**
+     * Handle the close() system call.
+     *
+     * Close a file descriptor, so that it no longer refers to any file or stream
+     * and may be reused.
+     *
+     * If the file descriptor refers to a file, all data written to it by write()
+     * will be flushed to disk before close() returns.
+     * If the file descriptor refers to a stream, all data written to it by write()
+     * will eventually be flushed (unless the stream is terminated remotely), but
+     * not necessarily before close() returns.
+     *
+     * The resources associated with the file descriptor are released. If the
+     * descriptor is the last reference to a disk file which has been removed using
+     * unlink, the file is deleted (this detail is handled by the file system
+     * implementation).
+     *
+     * Returns 0 on success, or -1 if an error occurred.
+     */
+    private int handleUnlink(int name) {
+        // TODO: Implement this
+        return -1;
+    }
 
     private static final int
         syscallHalt = 0,
@@ -388,16 +539,30 @@ public class UserProcess {
      * @return	the value to be returned to the user.
      */
     public int handleSyscall(int syscall, int a0, int a1, int a2, int a3) {
-	switch (syscall) {
-	case syscallHalt:
-	    return handleHalt();
+		switch (syscall) {
+			case syscallHalt:
+				return handleHalt();
+			case syscallExit:
+				handleExit(a0);
+				break;
+            case syscallCreate:
+                return handleCreat(a0);
+            case syscallOpen:
+                return handleOpen(a0);
+            case syscallRead:
+                return handleRead(a0, a1, a2);
+            case syscallWrite:
+                return handleWrite(a0, a1, a2);
+            case syscallClose:
+                return handleClose(a0);
+            case syscallUnlink:
+                return handleUnlink(a0);
+			default:
+				Lib.debug(dbgProcess, "Unknown syscall " + syscall);
+				Lib.assertNotReached("Unknown system call!");
+		}
 
-
-	default:
-	    Lib.debug(dbgProcess, "Unknown syscall " + syscall);
-	    Lib.assertNotReached("Unknown system call!");
-	}
-	return 0;
+		return 0;
     }
 
     /**
