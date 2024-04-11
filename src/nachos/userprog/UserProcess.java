@@ -2,9 +2,9 @@ package nachos.userprog;
 
 import nachos.machine.*;
 import nachos.threads.*;
-import nachos.userprog.*;
 
 import java.io.EOFException;
+import java.util.HashMap;
 
 /**
  * Encapsulates the state of a user process that is not contained in its
@@ -28,8 +28,8 @@ public class UserProcess {
         for (int i=0; i<numPhysPages; i++)
             pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
 
-        files[0] = UserKernel.console.openForReading();
-        files[1] = UserKernel.console.openForWriting();
+        files[0] = UserKernel.console.openForReading(); // stdin
+        files[1] = UserKernel.console.openForWriting(); // stdout
     }
     
     /**
@@ -52,12 +52,14 @@ public class UserProcess {
      * @return	<tt>true</tt> if the program was successfully executed.
      */
     public boolean execute(String name, String[] args) {
-	if (!load(name, args))
-	    return false;
-	
-	new UThread(this).setName(name).fork();
+        if (!load(name, args))
+            return false;
 
-	return true;
+        thread = new UThread(this);
+        thread.setName(name);
+        thread.fork();
+
+        return true;
     }
 
     /**
@@ -368,9 +370,119 @@ public class UserProcess {
      * exit() never returns.
 	 */
 	private void handleExit(int status) {
-        // TODO: Implement this
+        unloadSections();
+
+        // Close all open files
+        for (int i = 0; i < FD_MAX; i++) {
+            if (files[i] != null) {
+                files[i].close();
+                files[i] = null;
+            }
+        }
+
+        // Remove all child processes
+        for (UserProcess child : children.values()) {
+            child.parent = null;
+        }
+        children.clear();
+
+        statusCode = status;
+        Kernel.kernel.terminate();
 	}
 
+    /**
+     * Handle the exec() system call.
+     *
+     * Execute the program stored in the specified file, with the specified
+     * arguments, in a new child process. The child process has a new unique
+     * process ID, and starts with stdin opened as file descriptor 0, and stdout
+     * opened as file descriptor 1.
+     *
+     * file is a null-terminated string that specifies the name of the file
+     * containing the executable. Note that this string must include the ".coff"
+     * extension.
+     *
+     * argc specifies the number of arguments to pass to the child process. This
+     * number must be non-negative.
+     *
+     * argv is an array of pointers to null-terminated strings that represent the
+     * arguments to pass to the child process. argv[0] points to the first
+     * argument, and argv[argc-1] points to the last argument.
+     *
+     * exec() returns the child process's process ID, which can be passed to
+     * join(). On error, returns -1.
+     */
+    private int handleExec(int file, int argc, int argv) {
+        String program = readVirtualMemoryString(file, 256);
+        if (!program.endsWith(".coff")) {
+            Lib.debug(dbgProcess, "program filename must end with .coff");
+            return -1;
+        }
+
+        String[] args = new String[argc];
+        byte[] ptrBuff = new byte[4]; // 32-bit little-endian
+
+        for (int i = 0; i < argc; i++) {
+            int argPtrPtr = argv + i * 4;
+            readVirtualMemory(argPtrPtr, ptrBuff);
+            int argPtr = // Unwrap integer from buffer
+                    (ptrBuff[3] & 0xFF) << 24
+                    | (ptrBuff[2] & 0xFF) << 16
+                    | (ptrBuff[1] & 0xFF) << 8
+                    | (ptrBuff[0] & 0xFF);
+            args[i] = readVirtualMemoryString(argPtr, 256);
+        }
+
+        UserProcess process = newUserProcess();
+        if (process.execute(program, args)) {
+            int pid = pidCounter++;
+            process.parent = this;
+            children.put(pid, process);
+            return pid;
+        } else {
+            Lib.debug(dbgProcess, "failed to execute process");
+            return -1;
+        }
+    }
+
+    /**
+     * Handle the join() system call.
+     *
+     * Suspend execution of the current process until the child process specified
+     * by the processID argument has exited. If the child has already exited by the
+     * time of the call, returns immediately. When the current process resumes, it
+     * disowns the child process, so that join() cannot be used on that process
+     * again.
+     *
+     * processID is the process ID of the child process, returned by exec().
+     *
+     * status points to an integer where the exit status of the child process will
+     * be stored. This is the value the child passed to exit(). If the child exited
+     * because of an unhandled exception, the value stored is not defined.
+     *
+     * If the child exited normally, returns 1. If the child exited as a result of
+     * an unhandled exception, returns 0. If processID does not refer to a child
+     * process of the current process, returns -1.
+     */
+    private int handleJoin(int processID, int status) {
+        UserProcess child = children.get(processID);
+        if (child == null) {
+            return -1;
+        }
+
+        child.thread.join();
+        child.parent = null;
+        byte[] statusBuffer = Lib.bytesFromInt(child.statusCode);
+        writeVirtualMemory(status, statusBuffer);
+
+    }
+
+    /**
+     * Helper function for opening files in open and creat syscalls.
+     * @param name Virtual memory address of filename
+     * @param create True to create and open file, false to just open file
+     * @return File descriptor
+     */
     private int openFile(int name, boolean create) {
         // Get filename from memory
         String filename = readVirtualMemoryString(name, 256);
@@ -480,6 +592,10 @@ public class UserProcess {
         int read = readVirtualMemory(buffer, buff);
         int write = files[fd].write(buff, 0, read);
 
+        if (write < size) {
+            return -1;
+        }
+
         return write;
     }
 
@@ -527,7 +643,8 @@ public class UserProcess {
      * Returns 0 on success, or -1 if an error occurred.
      */
     private int handleUnlink(int name) {
-        // TODO: Implement this
+        String filename = readVirtualMemoryString(name, 256);
+        UserKernel.fileSystem.remove(filename);
         return -1;
     }
 
@@ -578,6 +695,10 @@ public class UserProcess {
 			case syscallExit:
 				handleExit(a0);
 				break;
+            case syscallExec:
+                return handleExec(a0, a1, a2);
+            case syscallJoin:
+                return handleJoin(a0, a1);
             case syscallCreate:
                 return handleCreat(a0);
             case syscallOpen:
@@ -648,6 +769,10 @@ public class UserProcess {
     // I think we could technically also use a HashMap with randomly-generated file descriptors
     private static final int FD_MAX = 32;
     private OpenFile[] files = new OpenFile[FD_MAX];
-    private int processIdCounter = 0;
+    private UThread thread;
+    private static int pidCounter = 0;
     private HashMap<Integer, UserProcess> children = new HashMap<>();
+    private UserProcess parent = null;
+    private Lock lock;
+    private Integer statusCode = null;
 }
