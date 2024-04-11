@@ -23,10 +23,13 @@ public class UserProcess {
      * Allocate a new process.
      */
     public UserProcess() {
-	int numPhysPages = Machine.processor().getNumPhysPages();
-	pageTable = new TranslationEntry[numPhysPages];
-	for (int i=0; i<numPhysPages; i++)
-	    pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
+        int numPhysPages = Machine.processor().getNumPhysPages();
+        pageTable = new TranslationEntry[numPhysPages];
+        for (int i=0; i<numPhysPages; i++)
+            pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
+
+        files[0] = UserKernel.console.openForReading();
+        files[1] = UserKernel.console.openForWriting();
     }
     
     /**
@@ -368,6 +371,26 @@ public class UserProcess {
         // TODO: Implement this
 	}
 
+    private int openFile(int name, boolean create) {
+        // Get filename from memory
+        String filename = readVirtualMemoryString(name, 256);
+
+        // Find available file descriptor slot in table
+        for (int i = 2; i < FD_MAX; i++) {
+            if (files[i] == null) {
+                OpenFile file = ThreadedKernel.fileSystem.open(filename, create);
+                if (file == null) {
+                    Lib.debug(dbgProcess, "\topen failed");
+                    return -1;
+                }
+                files[i] = file;
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     /**
      * Handle the creat() system call.
      *
@@ -380,8 +403,7 @@ public class UserProcess {
      * Returns the new file descriptor, or -1 if an error occurred.
      */
     private int handleCreat(int name) {
-        // TODO: Implement this
-        return -1;
+        return openFile(name, true);
     }
 
     /**
@@ -395,8 +417,7 @@ public class UserProcess {
      * Returns the new file descriptor, or -1 if an error occurred.
      */
     private int handleOpen(int name) {
-        // TODO: Implement this
-        return -1;
+        return openFile(name, false);
     }
 
     /**
@@ -422,8 +443,14 @@ public class UserProcess {
      * no more data is available.
      */
     private int handleRead(int fd, int buffer, int size) {
-        // TODO: Implement this
-        return -1;
+        OpenFile file = files[fd];
+        if (file == null)
+            return -1;
+        byte[] buff = new byte[size];
+        int read = file.read(buff, 0, size);
+        writeVirtualMemory(buffer, buff, 0, read);
+
+        return read;
     }
 
     /**
@@ -446,8 +473,14 @@ public class UserProcess {
      * if a network stream has already been terminated by the remote host.
      */
     private int handleWrite(int fd, int buffer, int size) {
-        // TODO: Implement this
-        return -1;
+        OpenFile file = files[fd];
+        if (file == null)
+            return -1;
+        byte[] buff = new byte[size];
+        int read = readVirtualMemory(buffer, buff);
+        int write = files[fd].write(buff, 0, read);
+
+        return write;
     }
 
     /**
@@ -470,26 +503,26 @@ public class UserProcess {
      * Returns 0 on success, or -1 if an error occurred.
      */
     private int handleClose(int fd) {
-        // TODO: Implement this
-        return -1;
+        if (files[fd] == null) {
+            return -1;
+        }
+
+        files[fd].close();
+        if (fd != 0 && fd != 1)
+            files[fd] = null; // TODO: should we be also be setting stdin and stdout to null when closing them?
+
+        return 0;
     }
 
     /**
-     * Handle the close() system call.
+     * Delete a file from the file system. If no processes have the file open, the
+     * file is deleted immediately and the space it was using is made available for
+     * reuse.
      *
-     * Close a file descriptor, so that it no longer refers to any file or stream
-     * and may be reused.
-     *
-     * If the file descriptor refers to a file, all data written to it by write()
-     * will be flushed to disk before close() returns.
-     * If the file descriptor refers to a stream, all data written to it by write()
-     * will eventually be flushed (unless the stream is terminated remotely), but
-     * not necessarily before close() returns.
-     *
-     * The resources associated with the file descriptor are released. If the
-     * descriptor is the last reference to a disk file which has been removed using
-     * unlink, the file is deleted (this detail is handled by the file system
-     * implementation).
+     * If any processes still have the file open, the file will remain in existence
+     * until the last file descriptor referring to it is closed. However, creat()
+     * and open() will not be able to return new file descriptors for the file
+     * until it is deleted.
      *
      * Returns 0 on success, or -1 if an error occurred.
      */
@@ -605,10 +638,16 @@ public class UserProcess {
 
     /** The number of pages in the program's stack. */
     protected final int stackPages = 8;
-    
+
     private int initialPC, initialSP;
     private int argc, argv;
-	
+
     private static final int pageSize = Processor.pageSize;
     private static final char dbgProcess = 'a';
+
+    // I think we could technically also use a HashMap with randomly-generated file descriptors
+    private static final int FD_MAX = 32;
+    private OpenFile[] files = new OpenFile[FD_MAX];
+    private int processIdCounter = 0;
+    private HashMap<Integer, UserProcess> children = new HashMap<>();
 }
