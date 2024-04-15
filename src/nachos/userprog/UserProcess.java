@@ -4,6 +4,7 @@ import nachos.machine.*;
 import nachos.threads.*;
 
 import java.io.EOFException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 
 /**
@@ -28,6 +29,7 @@ public class UserProcess {
         for (int i=0; i<numPhysPages; i++)
             pageTable[i] = new TranslationEntry(i,i, true,false,false,false);
 
+        pid = pidCounter++;
         files[0] = UserKernel.console.openForReading(); // stdin
         files[1] = UserKernel.console.openForWriting(); // stdout
     }
@@ -316,6 +318,7 @@ public class UserProcess {
      */
     protected void unloadSections() {
         // TODO: Do we have to implement this?
+        coff.close();
     }
 
     /**
@@ -386,8 +389,11 @@ public class UserProcess {
         }
         children.clear();
 
-        statusCode = status;
-        Kernel.kernel.terminate();
+        exitCode = status;
+        UThread.finish();
+        if (pid == 0) { // Assume that the first process (pid 0) spawns all child processes
+            Kernel.kernel.terminate();
+        }
 	}
 
     /**
@@ -435,10 +441,9 @@ public class UserProcess {
 
         UserProcess process = newUserProcess();
         if (process.execute(program, args)) {
-            int pid = pidCounter++;
             process.parent = this;
-            children.put(pid, process);
-            return pid;
+            children.put(process.pid, process);
+            return process.pid;
         } else {
             Lib.debug(dbgProcess, "failed to execute process");
             return -1;
@@ -472,9 +477,9 @@ public class UserProcess {
 
         child.thread.join();
         child.parent = null;
-        byte[] statusBuffer = Lib.bytesFromInt(child.statusCode);
+        byte[] statusBuffer = Lib.bytesFromInt(child.exitCode);
         writeVirtualMemory(status, statusBuffer);
-
+        return -1;
     }
 
     /**
@@ -770,9 +775,10 @@ public class UserProcess {
     private static final int FD_MAX = 32;
     private OpenFile[] files = new OpenFile[FD_MAX];
     private UThread thread;
+    private int pid;
     private static int pidCounter = 0;
     private HashMap<Integer, UserProcess> children = new HashMap<>();
     private UserProcess parent = null;
     private Lock lock;
-    private Integer statusCode = null;
+    private Integer exitCode = null; // If exit code is null, the process has not called exit() yet
 }
